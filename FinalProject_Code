@@ -1,0 +1,647 @@
+# LAUREN MURPHY FINAL PROJECT
+# MA 346 EDDIE KIM
+
+
+# IMPORT PACAKGES
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+from scipy import stats
+from google.colab import files
+
+# READING FILES
+df = pd.read_csv("/content/snap.csv")
+df2 = pd.read_csv("/content/2003_2016.csv")
+
+# DATA PREPARATION
+df2.rename(columns={'State': 'State_Abbreviation'}, inplace=True)
+df2.rename(columns={'Year2': 'Observation_Year'}, inplace=True)
+
+df['Observation_Year'] = pd.to_datetime(df['Observation_Year']) # makes a new column and converts to datetime obj
+df['Year'] = df['Observation_Year'].dt.year # extracts year and makes it a new column
+df['Month'] = df['Observation_Year'].dt.month
+
+# SUBSETTING
+df2_ = df2.loc[:,  ['State_Abbreviation', '% Poverty Estimate (All Ages)', 'Year_Only ']]
+df_ = df.loc[:, ['State_Abbreviation', 'Is_Simplified_Reporting_Option_Available', 'Observation_Year', 'Year']]
+
+df2_ = df2_.fillna(0)
+df_ = df_.fillna(0)
+
+
+# 1) SIMPLIFIED REPORTING
+
+
+# FILL WITH 0.5
+df_filtered = df_[df_['Year'] >= 2003]
+df_filtered = df_filtered.fillna(0.5)
+
+# 6 RULE
+def check_false_majority(group):
+    count_false = (group['Is_Simplified_Reporting_Option_Available'] == False).sum()
+    return False if count_false > 6 else True
+new_values = df_filtered.groupby(['State_Abbreviation', 'Year']).apply(check_false_majority)
+new_values = new_values.reset_index(name='Six_Rule')
+
+# SUBSETTING
+df_sixrule = new_values
+df_average_poverty = df2_.groupby(['State_Abbreviation', 'Year_Only '])['% Poverty Estimate (All Ages)'].mean().reset_index()
+df_average_poverty = df_average_poverty[df_average_poverty['State_Abbreviation'] != 'US']
+df_average_poverty.rename(columns={'% Poverty Estimate (All Ages)': 'Average_Poverty'}, inplace=True)
+
+# MERGING
+df_merged = pd.merge(df_sixrule, df_average_poverty, how='inner', left_on=['State_Abbreviation', 'Year'], right_on=['State_Abbreviation', 'Year_Only '])
+poverty_and_online = df_merged.drop(columns=['Year_Only '])
+
+grouped_stats = poverty_and_online.groupby('Six_Rule')['Average_Poverty'].describe()
+poverty_and_online = poverty_and_online[poverty_and_online['State_Abbreviation'] != 'DC']
+
+# FINDING OVERALL RULES
+merge_six_poverty = pd.DataFrame(poverty_and_online) #CONVERT
+unique_years = merge_six_poverty['Year'].unique() #FIND UNIQUE YEARS
+all_years_stats = []  # LIST TO HOLD
+
+for year in unique_years:
+    df_year = poverty_and_online[poverty_and_online['Year'] == year]
+    grouped_stats = df_year.groupby('Six_Rule')['Average_Poverty'].describe()
+    grouped_stats['Year'] = year
+    all_years_stats.append(grouped_stats.reset_index())
+
+all_years_df = pd.concat(all_years_stats)
+all_years_df.reset_index(drop=True, inplace=True)
+
+# PLOTTING
+plt.figure(figsize=(10, 6))
+sns.lineplot(x='Year', y='count', hue='Six_Rule', data=all_years_df, marker='o')
+plt.title('Count of Simple Reporting by Six_Rule Over Years')
+plt.legend(['Offline', 'Online'])
+plt.ylabel('6 Rule Count')
+plt.xlabel('Year')
+plt.legend(title='Six_Rule')
+plt.grid(True)
+plt.show()
+
+# FIND COUNT FOR EACH YEAR
+all_years_df_count = all_years_df.loc[:, ['count', 'Year', 'Six_Rule']]
+zero_values = all_years_df_count[all_years_df_count['Six_Rule'] == 0].sort_values(by='Year', ascending=True)
+one_values = all_years_df_count[all_years_df_count['Six_Rule'] == 1].sort_values(by='Year', ascending=True)
+values_rearranged = pd.merge(zero_values, one_values, on='Year', suffixes=('_zero', '_one'))
+values_rearranged.rename(columns={'Six_Rule_one': 'six_rule_one'}, inplace=True)
+values_rearranged = values_rearranged[['Year', 'count_zero', 'count_one', 'Six_Rule_zero', 'six_rule_one']]
+values_rearranged = values_rearranged.drop(columns=['Six_Rule_zero', 'six_rule_one'])
+print(values_rearranged)
+
+
+# 2) CERTIFICATION
+
+
+# 1-3 MONTH CERTIFICATION
+
+# CLEAN DATA
+df_fastrate = df.loc[:, ['State_Abbreviation', 'Units_1_to_3_Months_Recertification', 'Observation_Year', 'Year']]
+df2_fastrate = df2.loc[:, ['State_Abbreviation','% Poverty Estimate (All Ages)','Year_Only ']]
+
+df_fastrate = df_fastrate[df_fastrate['Year'] >= 2003]
+df_fastrate = df_fastrate.fillna(0)
+df2_fastrate = df2_fastrate.fillna(0)
+
+# FIND VALUES
+df_fastrate = df_fastrate.groupby(['State_Abbreviation', 'Year'])['Units_1_to_3_Months_Recertification'].mean().reset_index()
+df2_fastrate = df2_fastrate.groupby(['State_Abbreviation','Year_Only '])['% Poverty Estimate (All Ages)'].mean().reset_index()
+
+# MERGE
+df_merged_fastrate = pd.merge(df_fastrate, df2_fastrate, how='inner', left_on=['State_Abbreviation', 'Year'], right_on=['State_Abbreviation', 'Year_Only '])
+
+# CONVERT VALUES
+df_merged_fastrate['1_3_Coverted']= df_merged_fastrate['Units_1_to_3_Months_Recertification'] * 100
+df_merged_fastrate['Poverty_Converted'] = df_merged_fastrate["% Poverty Estimate (All Ages)"] * 100
+
+# CREATE REGRESSION
+y = df_merged_fastrate['Poverty_Converted']
+X = df_merged_fastrate[['1_3_Coverted']]  # Add a constant to the model
+X = sm.add_constant(X)
+
+model = sm.OLS(y, X).fit()
+'''print(model.summary())'''
+
+# FIND MAX
+test = df_merged_fastrate.loc[df_merged_fastrate['1_3_Coverted']> 5]
+test = test['State_Abbreviation'].count
+max_value = df_merged_fastrate['1_3_Coverted'].max()
+
+#PLOT
+plt.scatter(X['1_3_Coverted'], y, color='blue', label='Data Points')
+plt.plot(X['1_3_Coverted'], model.predict(), color='red', label='Regression Line')
+plt.title('Recertification Analysis: 1-3 Months')
+plt.xlim(0,max_value)
+plt.xlabel('Percent of People with 1-3 Months Recertification')
+plt.ylabel('% Poverty Estimate (All Ages)')
+plt.legend()
+plt.show()
+
+# new subset
+# OMIT OUTLIERS
+df_merged_fastrate['1_3_Coverted']= df_merged_fastrate['Units_1_to_3_Months_Recertification'] * 100
+df_merged_fastrate['Poverty_Converted'] = df_merged_fastrate["% Poverty Estimate (All Ages)"] * 100
+df_merged_fastrate =df_merged_fastrate.loc[df_merged_fastrate['1_3_Coverted']>3] # filter to get rid of small, irrelevant data
+
+# CREATE REGRESSION
+y = df_merged_fastrate['Poverty_Converted']
+X = df_merged_fastrate[['1_3_Coverted']]
+X = sm.add_constant(X)
+model = sm.OLS(y, X).fit()
+'''print(model.summary())'''
+
+# PLOT
+plt.scatter(X['1_3_Coverted'], y, color='blue', label='Data Points')
+plt.plot(X['1_3_Coverted'], model.predict(), color='red', label='Regression Line')
+plt.title('Recertification Analysis: 1-3 Months: Noise Elimination')
+plt.xlim(3,max_value+1)
+plt.xlabel('Units with 1-3 Months Recertification (%)')
+plt.ylabel('Percent of People with 1-3 Months Recertification')
+plt.legend()
+plt.show()
+
+
+# 4-6 MONTH CERTIFICATION
+
+# CLEAN DATA
+df_moderaterate = df.loc[:, ['State_Abbreviation', 'Units_4_to_6_Months_Recertification', 'Observation_Year', 'Year']]
+df2_moderaterate = df2.loc[:, ['State_Abbreviation','% Poverty Estimate (All Ages)','Year_Only ']]
+
+df_moderaterate = df_moderaterate[df_moderaterate['Year'] >= 2003]
+df_moderaterate = df_moderaterate.fillna(0) # fill with the mean
+df2_moderaterate = df2_moderaterate.fillna(0)
+
+# FIND VALUES
+df_moderaterate = df_moderaterate.groupby(['State_Abbreviation', 'Year'])['Units_4_to_6_Months_Recertification'].mean().reset_index()
+df2_moderaterate = df2_moderaterate.groupby(['State_Abbreviation','Year_Only '])['% Poverty Estimate (All Ages)'].mean().reset_index()
+
+# MERGE
+df_moderaterate_merged = pd.merge(df_moderaterate, df2_moderaterate, how='inner', left_on=['State_Abbreviation', 'Year'], right_on=['State_Abbreviation', 'Year_Only '])
+df_moderaterate_merged['Adjusted 4-6 Months']= df_moderaterate_merged['Units_4_to_6_Months_Recertification'] *100
+
+
+# MAKE REGRESSION
+y_2 = df_moderaterate_merged["% Poverty Estimate (All Ages)"] * 100  # Convert to percentage
+X_2 = df_moderaterate_merged[['Units_4_to_6_Months_Recertification']] * 100  # Convert to percentage
+X_2 = sm.add_constant(X_2)
+
+model = sm.OLS(y_2, X_2).fit()
+'''print(model.summary())'''
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_2['Units_4_to_6_Months_Recertification'], y_2, color='blue', label='Data Points')
+plt.plot(X_2['Units_4_to_6_Months_Recertification'], model.predict(), color='red', label='Regression Line')
+plt.title('Regression Analysis 4-6')
+plt.xlim(0, 80)
+plt.xlabel('Percent of People with 4-6 Months Recertification')
+plt.ylabel('% Poverty Estimate')
+plt.legend()
+
+# new subset
+# OMIT NOISE
+df_moderaterate_merged = df_moderaterate_merged.loc[df_moderaterate_merged['Adjusted 4-6 Months']>3]
+df_moderaterate_merged['Poverty_Converted'] = df_moderaterate_merged["% Poverty Estimate (All Ages)"] * 100
+
+# REGRESSION
+y_2 = df_moderaterate_merged['Poverty_Converted']
+X_2 = df_moderaterate_merged['Adjusted 4-6 Months']
+X_2 = sm.add_constant(X_2)
+
+model = sm.OLS(y_2, X_2).fit()
+print(model.summary())
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_2['Adjusted 4-6 Months'], y_2, color='blue', label='Data Points')
+plt.plot(X_2['Adjusted 4-6 Months'], model.predict(), color='red', label='Regression Line')
+plt.title('Regression Analysis: 4-6 Months Noise')
+plt.xlim(3, 80)
+plt.xlabel('Percent of People with 4-6 Months Recertification')
+plt.ylabel('% Poverty Estimate')
+plt.legend()
+plt.show()
+
+
+# 7-12 MONTHS CERTIFICATION
+
+# CLEAN DATA
+df_high = df.loc[:, ['State_Abbreviation', 'Units_7_to_12_Months_Recertification', 'Observation_Year', 'Year']]
+df2_high = df2.loc[:, ['State_Abbreviation','% Poverty Estimate (All Ages)','Year_Only ']]
+
+df_high = df_high[df_high['Year'] >= 2003]
+df_high = df_high.fillna(0)
+df2_high = df2_high.fillna(0)
+
+#  FIND VALUES
+df_high = df_high.groupby(['State_Abbreviation', 'Year'])['Units_7_to_12_Months_Recertification'].mean().reset_index()
+df2_high = df2_high.groupby(['State_Abbreviation','Year_Only '])['% Poverty Estimate (All Ages)'].mean().reset_index()
+
+# MERGE
+df_high_merged = pd.merge(df_high, df2_high, how='inner', left_on=['State_Abbreviation', 'Year'], right_on=['State_Abbreviation', 'Year_Only '])
+df_high_merged['7-12 adjusted'] = df_high_merged['Units_7_to_12_Months_Recertification'] *100
+
+# REGRESSION
+y_2 = df_high_merged["% Poverty Estimate (All Ages)"] * 100  # Convert to percentage
+X_2 = df_high_merged[['7-12 adjusted']]
+X_2 = sm.add_constant(X_2)
+
+model = sm.OLS(y_2, X_2).fit()
+'''print(model.summary())'''
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_2['7-12 adjusted'], y_2, color='blue', label='Data Points')
+plt.plot(X_2['7-12 adjusted'], model.predict(), color='red', label='Regression Line')
+plt.title('Regression Analysis: 7-12 Months')
+plt.xlim(0, 100)
+plt.xlabel('Percent of People with 7-12 Months Recertification')
+plt.ylabel('% Poverty Estimate')
+plt.legend()
+plt.show()
+
+# new subset
+# OMIT NOISE
+df_high_merged = df_high_merged.loc[df_high_merged['7-12 adjusted']>3]
+df_high_merged['Poverty_Converted'] = df_high_merged["% Poverty Estimate (All Ages)"] * 100
+
+# REGRESSION
+y_2 = df_high_merged['Poverty_Converted']
+X_2 = df_high_merged[['7-12 adjusted']]
+X_2 = sm.add_constant(X_2)
+model = sm.OLS(y_2, X_2).fit()
+print(model.summary())
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_2['7-12 adjusted'], y_2, color='blue', label='Data Points')
+plt.plot(X_2['7-12 adjusted'], model.predict(), color='red', label='Regression Line')
+plt.title('Regression Analysis: 7-12 Months Noise Adjustment')
+plt.xlim(3, 100)
+plt.xlabel('Percent of People with 7-12 Months Recertification')
+plt.ylabel('% Poverty Estimate')
+plt.legend()
+plt.show()
+
+
+# 13+ CERTIFICATION
+
+
+# CLEAN DATA
+df_cert_4_6 = df.loc[:, ['State_Abbreviation', 'Units_13_Plus_Months_Recertification', 'Observation_Year', 'Year']]
+df2_cert = df2.loc[:, ['State_Abbreviation','% Poverty Estimate (All Ages)','Year_Only ']]
+
+df_cert_4_6 = df_cert_4_6[df_cert_4_6['Year'] >= 2003]
+df_cert_4_6 = df_cert_4_6.fillna(0)
+df2_cert = df2_cert.fillna(0)
+
+# FIND VALUES
+df_cert_4_6 = df_cert_4_6.groupby(['State_Abbreviation', 'Year'])['Units_13_Plus_Months_Recertification'].mean().reset_index()
+df2_cert = df2_cert.groupby(['State_Abbreviation','Year_Only '])['% Poverty Estimate (All Ages)'].mean().reset_index()
+
+# MERGE
+df_merged_5 = pd.merge(df_cert_4_6, df2_cert, how='inner', left_on=['State_Abbreviation', 'Year'], right_on=['State_Abbreviation', 'Year_Only '])
+
+
+# REGRESSION
+y_2 = df_merged_5["% Poverty Estimate (All Ages)"] * 100  # Convert to percentage
+X_2 = df_merged_5[['Units_13_Plus_Months_Recertification']] * 100  # Convert to percentage
+X_2 = sm.add_constant(X_2)
+
+model = sm.OLS(y_2, X_2).fit()
+'''print(model.summary())'''
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_2['Units_13_Plus_Months_Recertification'], y_2, color='blue', label='Data Points')
+plt.plot(X_2['Units_13_Plus_Months_Recertification'], model.predict(), color='red', label='Regression Line')
+plt.title('Regression Analysis: 13+ Months')
+plt.xlim(0, 40)
+plt.xlabel('Percent of People with 13+ Months Recertification')
+plt.ylabel('% Poverty Estimate')
+plt.legend()
+plt.show()
+
+# new subset
+# OMIT NOISE
+df_merged_5['poverty_adjusted']=df_merged_5['% Poverty Estimate (All Ages)']*100
+df_merged_5['13_adjusted']=df_merged_5['Units_13_Plus_Months_Recertification']*100
+df_merged_5 = df_merged_5.loc[df_merged_5['13_adjusted']> 3]
+
+# REGRESSION
+y_2 = df_merged_5['poverty_adjusted']
+X_2 = df_merged_5[['13_adjusted']]
+X_2 = sm.add_constant(X_2)
+
+model = sm.OLS(y_2, X_2).fit()
+print(model.summary())
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_2['13_adjusted'], y_2, color='blue', label='Data Points')
+plt.plot(X_2['13_adjusted'], model.predict(), color='red', label='Regression Line')
+plt.title('Regression Analysis: 13+ Months Noise Adjustment')
+plt.xlim(5, 25)
+plt.xlabel('Percent of People with 13+ Months Recertification')
+plt.ylabel('% Poverty Estimate')
+plt.legend()
+plt.show()
+
+# 3) ONLINE SNAP SUBMISSION
+
+
+
+# CLEAN DATA
+online_df = df.loc[:,['State_Abbreviation','Year','Online_SNAP_Application_Submission']]
+online_df = online_df[online_df['Year'] >= 2003]
+online_df.fillna(0)
+
+# Sort data based on response, grouby to make columns, sizing to take the counts for each, rename for merging purposes, then filling n/a with 0
+online_yes = online_df[online_df['Online_SNAP_Application_Submission'] == 'yes, Statewide'].groupby(['State_Abbreviation', 'Year']).size().reset_index(name='yes').fillna(0)
+online_sorta = online_df[online_df['Online_SNAP_Application_Submission'] == 'yes, in only select parts of the State'].groupby(['State_Abbreviation', 'Year']).size().reset_index(name='sorta').fillna(0)
+online_no = online_df[online_df['Online_SNAP_Application_Submission'] == 'no'].groupby(['State_Abbreviation', 'Year']).size().reset_index(name='no').fillna(0)
+
+all_states = ['AK', 'AL', 'AR', 'AS', 'AZ', 'CA', 'CO', 'CT', 'DC', 'DE', 'FL', 'GA', 'GU', 'HI', 'IA', 'ID', 'IL', 'IN', 'KS', 'KY', 'LA', 'MA', 'MD', 'ME', 'MI', 'MN', 'MO', 'MP', 'MS', 'MT', 'NC', 'ND', 'NE', 'NH', 'NJ', 'NM', 'NV', 'NY', 'OH', 'OK', 'OR', 'PA', 'PR', 'RI', 'SC', 'SD', 'TN', 'TX', 'UM', 'UT', 'VA', 'VI', 'VT', 'WA', 'WI', 'WV', 'WY']
+years = range(2003, 2016)
+all_combinations = pd.DataFrame([(state, year) for state in all_states for year in years], columns=['State_Abbreviation', 'Year'])
+
+# MERGE
+merged_df = pd.merge(all_combinations, online_sorta, on=['State_Abbreviation', 'Year'], how='left')
+merged_df = pd.merge(merged_df, online_no, on=['State_Abbreviation', 'Year'], how='left')
+merged_df = pd.merge(merged_df, online_yes, on=['State_Abbreviation','Year'], how ='left')
+merged_df.fillna(0)
+
+df_average_poverty.rename(columns={'% Poverty Estimate (All Ages)': 'Average_Poverty'}, inplace=True)
+df_average_poverty.rename(columns={'Year_Only ': 'Year'}, inplace=True) #inplace true makes it work idky
+df_average_poverty = df_average_poverty[df_average_poverty['State_Abbreviation'] != 'US']
+
+merged_df_a= pd.merge(df_average_poverty, merged_df, on=['Year', 'State_Abbreviation'])
+merged_df_a.fillna(0, inplace=True)
+
+# POINT SYSTEM
+merged_df_a['no_converted'] = merged_df_a['no'] * -1
+merged_df_a['yes_converted'] = merged_df_a['yes'] * 1
+merged_df_a['sorta_converted'] = merged_df_a['sorta'] * 0
+
+# MAKE NEW COLUMNS
+merged_df_a['calculation'] = merged_df_a[['no_converted', 'yes_converted', 'sorta_converted']].sum(axis=1)
+merged_df_a['Poverty_Converted'] =merged_df_a['Average_Poverty'] *100
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(merged_df_a['calculation'], merged_df_a['Poverty_Converted'])
+plt.xlabel('Online Availability Score')
+plt.ylabel('Average Poverty')
+plt.title('Online Availability Score vs Average Poverty')
+plt.grid(True)
+plt.show()
+
+# FIND MAX AND MIN VALUES
+filter_negtwelve_value_mean = merged_df_a[merged_df_a['calculation']==-12]
+filter_negtwelve_value_mean = filter_negtwelve_value_mean['Average_Poverty']
+worst_stats = filter_negtwelve_value_mean.describe()
+
+filter_postwelve_value_mean = merged_df_a[merged_df_a['calculation']==12]
+filter_postwelve_value_mean = filter_postwelve_value_mean['Average_Poverty']
+best_stats= filter_postwelve_value_mean.describe()
+
+print(f'the statistics for best scoring states', worst_stats,'and best scoring states is',best_stats)
+
+# MERGE VALUES
+best_stats.columns = ['Best_Scoring_States']
+worst_stats.columns = ['Worst_Scoring_States']
+scoring_stats = pd.concat([best_stats, worst_stats], axis=1, keys=['Best_Scoring_States', 'Worst_Scoring_States'])
+# MAKE NEW COLUMN
+scoring_stats['Diffrence'] = scoring_stats['Worst_Scoring_States'] - scoring_stats['Best_Scoring_States']
+
+# FIND UPPPER AND LOWER BOUNDS
+scoring_stats_bottom = merged_df_a[(merged_df_a['calculation'] >= -12) & (merged_df_a['calculation'] < 0)]
+scoring_stats_top = merged_df_a[(merged_df_a['calculation'] > 0) & (merged_df_a['calculation'] <= 12)]
+scoring_stats_bottom['Poverty_Converted']= scoring_stats_bottom['Average_Poverty']*100
+scoring_stats_top['Poverty_Converted']= scoring_stats_top['Average_Poverty']*100
+
+topscore_max = scoring_stats_top['Poverty_Converted'].max()
+bottomscore_maxes = scoring_stats_bottom[scoring_stats_bottom['Poverty_Converted'] > topscore_max]
+
+# STATISTICS
+selected_columns = ['Poverty_Converted', 'calculation']
+bottom_describe = scoring_stats_bottom[selected_columns].describe()
+top_describe = scoring_stats_top[selected_columns].describe()
+print(bottom_describe)
+print(top_describe)
+mean_poverty_top = top_describe.loc['mean', 'Poverty_Converted']
+mean_poverty_bottom = bottom_describe.loc['mean', 'Poverty_Converted']
+('f difference in mean', mean_poverty_bottom - mean_poverty_top)
+
+# PULL DATA FOR PLOTTING
+lowest_values = [7.109091, 11.028312, 14.001275, 17.765533, 27.028916]
+highest_values = [8.263636, 11.988000, 14.309709, 17.955172, 23.303750] # converted to positive values
+fig, ax = plt.subplots()
+
+# PLOT
+ax.boxplot([lowest_values, highest_values], labels=['Lowest Scoring Values', 'Highest Scoring Values'])
+ax.set_title('Boxplot of Lowest Values and Highest Values: Online')
+ax.set_ylabel('Poverty Percentage')
+plt.show()
+
+# PULL AGGREGATE VALUES
+grouped_df_a = merged_df_a.groupby('State_Abbreviation').agg({
+    'Average_Poverty': 'mean',  # this brings together all years from 2003-2016
+    'sorta': 'sum',
+    'no': 'sum',
+    'yes': 'sum',
+    'no_converted': 'sum',
+    'yes_converted': 'sum',
+    'sorta_converted': 'sum',
+    'calculation': 'sum'
+}).reset_index()
+
+# since its the sum of 13 years, we take the average overall by dividing by 13
+grouped_df_a['calculation_converted'] =grouped_df_a['calculation']/13
+
+
+# REGRESSION
+y_3 = grouped_df_a["Average_Poverty"] * 100  # Convert to percentage
+X_3 = grouped_df_a[['calculation_converted']]
+X_3 = sm.add_constant(X_3)
+model_3 = sm.OLS(y_3, X_3).fit()
+
+# PLOTTING
+plt.figure(figsize=(10, 6))
+plt.scatter(X_3['calculation_converted'], y_3, color='blue')
+plt.plot(X_3['calculation_converted'], model_3.predict(X_3), color='red')
+
+plt.xlabel('Online Availability Score')
+plt.ylabel('Average Poverty in Percentage Points')
+plt.title('Online Availability Score vs Average Poverty')
+plt.grid(True)
+plt.show()
+print(model_3.summary())
+
+
+# 4) CALL CENTER
+
+# CLEAN DATA
+call_center = df.loc[:, ['State_Abbreviation', 'Year', 'Call_Centers_Availability']]
+call_center_df = call_center[call_center['Year'] >= 2003]
+call_center_df.fillna(0)
+
+
+# youre sorting data based on response, grouby to make columns, sizing to take the counts for each, rename for merging purposes, then filling n/a with 0 b/c it means it doesnt apply
+call_yes = call_center_df[call_center_df['Call_Centers_Availability'] == 'call centers available Statewide'].groupby(['State_Abbreviation', 'Year']).size().reset_index(name='Yes').fillna(0)
+call_sorta = call_center_df[call_center_df['Call_Centers_Availability'] == 'call centers available only in select parts of the State'].groupby(['State_Abbreviation', 'Year']).size().reset_index(name='sorta').fillna(0)
+call_no = call_center_df[call_center_df['Call_Centers_Availability'] == 'no call centers'].groupby(['State_Abbreviation', 'Year']).size().reset_index(name='no').fillna(0)
+
+
+
+all_states = ['AK', 'AL', 'AR', 'AS', 'AZ', 'CA', 'CO', 'CT', 'DC', 'DE', 'FL', 'GA', 'GU', 'HI', 'IA', 'ID', 'IL', 'IN', 'KS', 'KY', 'LA', 'MA', 'MD', 'ME', 'MI', 'MN', 'MO', 'MP', 'MS', 'MT', 'NC', 'ND', 'NE', 'NH', 'NJ', 'NM', 'NV', 'NY', 'OH', 'OK', 'OR', 'PA', 'PR', 'RI', 'SC', 'SD', 'TN', 'TX', 'UM', 'UT', 'VA', 'VI', 'VT', 'WA', 'WI', 'WV', 'WY']
+all_combinations_call = pd.DataFrame([(state, year) for state in all_states for year in years], columns=['State_Abbreviation', 'Year'])
+
+# MERGE SUBSETS
+merged_df_call = pd.merge(all_combinations_call, call_sorta, on=['State_Abbreviation', 'Year'], how='left')
+merged_df_call = pd.merge(merged_df, call_no, on=['State_Abbreviation', 'Year'], how='left')
+merged_df_call = pd.merge(merged_df, call_yes, on=['State_Abbreviation','Year'], how ='left')
+
+# CLEAN
+merged_df_call.fillna(0)
+df_average_poverty.rename(columns={'% Poverty Estimate (All Ages)': 'Average_Poverty'}, inplace=True)
+df_average_poverty.rename(columns={'Year_Only ': 'Year'}, inplace=True) #inplace true makes it work idky
+df_average_poverty = df_average_poverty[df_average_poverty['State_Abbreviation'] != 'US']
+
+
+# MERGE OPTIONS AND POVERTY
+merged_df_call= pd.merge(df_average_poverty, merged_df_call, on=['Year', 'State_Abbreviation'])
+merged_df_call.fillna(0, inplace=True)
+# CREATE RULE
+merged_df_call['no_converted'] = merged_df_call['no'] * -1
+merged_df_call['yes_converted'] = merged_df_call['Yes'] * 1
+merged_df_call['sorta_converted'] = merged_df_call['sorta'] * 0
+
+#MERGE
+merged_df_call['calculation_2'] = merged_df_call[['no_converted', 'yes_converted', 'sorta_converted']].sum(axis=1)
+plt.clf()
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(merged_df_call['calculation_2'], merged_df_call['Average_Poverty'])
+plt.xlabel('Call center Scoring')
+plt.ylabel('Average Poverty')
+plt.title('Call center  vs Average Poverty')
+plt.grid(True)
+plt.show()
+
+# HIGHEST AND LOWEST STATISTICS
+filter_negtwelve_value_mean = merged_df_call[merged_df_call['calculation_2']==-12]
+filter_negtwelve_value_mean_ = filter_negtwelve_value_mean['Average_Poverty']
+filter_postwelve_value_mean = merged_df_call[merged_df_call['calculation_2']==12]
+filter_postwelve_value_mean_ = filter_postwelve_value_mean['Average_Poverty']
+
+topscore_outliers = filter_postwelve_value_mean['Average_Poverty'].max()
+bottomscore_outliers = filter_negtwelve_value_mean[filter_negtwelve_value_mean['Average_Poverty'] > topscore_outliers]
+
+# UPPER AND LOWER BOUND STATISTICS
+scoring_stats_bottom = merged_df_call[(merged_df_call['calculation_2'] >= -12) & (merged_df_call['calculation_2'] < 0)]
+scoring_stats_top = merged_df_call[(merged_df_call['calculation_2'] > 0) & (merged_df_call['calculation_2'] <= 12)]
+scoring_stats_bottom['Average_Poverty']= scoring_stats_bottom['Average_Poverty']*100
+scoring_stats_top['Average_Poverty']= scoring_stats_top['Average_Poverty']*100
+
+selected_columns = ['Average_Poverty', 'calculation_2']
+bottom_describe = scoring_stats_bottom[selected_columns].describe()
+top_describe = scoring_stats_top[selected_columns].describe()
+print('the statistics for worst scoring states',bottom_describe)
+print('the statistics for worst scoring states',top_describe)
+
+# AGGREGATE VALUES
+grouped_df_b = merged_df_call.groupby('State_Abbreviation').agg({
+    'Average_Poverty': 'mean',  # this brings together all years from 2003-2016
+    'sorta': 'sum',
+    'no': 'sum',
+    'yes': 'sum',
+    'no_converted': 'sum',
+    'yes_converted': 'sum',
+    'sorta_converted': 'sum',
+    'calculation_2': 'sum'
+}).reset_index()
+
+# since its the sum of 13 years, we take the average overall by dividing by 13
+grouped_df_b['calculation_converted'] =grouped_df_b['calculation_2']/13
+
+
+# REGRESSION
+y_3 = grouped_df_b["Average_Poverty"] * 100  # Convert to percentage
+X_3 = grouped_df_b[['calculation_converted']]
+X_3 = sm.add_constant(X_3)
+model_3 = sm.OLS(y_3, X_3).fit()
+
+
+# PLOT
+plt.figure(figsize=(10, 6))
+plt.scatter(X_3['calculation_converted'], y_3, color='blue')
+plt.plot(X_3['calculation_converted'], model_3.predict(X_3), color='red')
+plt.xlabel('Call Center Availability Score')
+plt.ylabel('Average Poverty in Percentage Points')
+plt.title('Call Center Availability Score vs Average Poverty')
+plt.grid(True)
+plt.show()
+print(model_3.summary())
+
+# PULL VALUES FOR PLOTTING
+lowest_values = [7.109091, 10.78333, 14.544585, 17.838698, 27.028916]
+highest_values = [9.722222, 12.656233, 15.770329, 19.031250, 23.303750] #make these positive
+fig, ax = plt.subplots()
+
+# PLOTTING
+ax.boxplot([lowest_values, highest_values], labels=['Lowest Scoring Values', 'Highest Scoring Values'])
+ax.set_title('Boxplot of Lowest Values and Highest Values')
+ax.set_ylabel('Poverty Percentage')
+plt.show()
+
+# AVERAGE CERTIFICATION
+
+# CLEAN DATA
+df_average_cert = df.loc[:,['State_Abbreviation','Average_Certification_Period','Year']]
+df_average_cert = df_average_cert[df_average_cert['Year'] >= 2003]
+df_average = df2_cert
+
+# FIND VALUES
+average = df_average_cert.groupby(['State_Abbreviation', 'Year'])['Average_Certification_Period'].mean().reset_index()
+df_average.rename(columns={'Year_Only ': 'Year'}, inplace=True)
+
+# MERGE
+df_merged_bror = pd.merge(average, df_average, how='inner', on=['State_Abbreviation', 'Year'])
+
+# PLOT
+plt.figure(figsize=(14, 8))
+sns.scatterplot(data=df_merged_bror, x='Average_Certification_Period', y='% Poverty Estimate (All Ages)', marker='o', linestyle='-')
+plt.title('Poverty Estimate vs. Average Certification Period by State')
+plt.xlabel('Average Certification Period (Months)')
+plt.ylabel('Poverty Estimate (%)')
+plt.grid(True)
+plt.legend(title='State', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
+
+
+# DATA ANALYSIS
+section_1_df = df_merged_bror.loc[df_merged_bror['Average_Certification_Period'] < 9]
+section_1_df = section_1_df.describe()
+section_1_df = section_1_df.reset_index() # this makes the stats a column instead
+
+section_2_df = df_merged_bror.loc[df_merged_bror['Average_Certification_Period'] > 9]
+section_2_df = section_2_df.describe()
+section_2_df = section_2_df.reset_index() # this makes the stats a column instead
+
+merged_average = pd.merge(section_1_df,section_2_df, on='index')
+merged_average = merged_average.rename(columns={'Average_Certification_Period_x': 'Av_Cert_under9', '% Poverty Estimate (All Ages)_x': 'pov_est_under9'})
+merged_average = merged_average.rename(columns={'Average_Certification_Period_y': 'Av_Cert_over9', '% Poverty Estimate (All Ages)_y': 'pov_est_over9'})
+merged_average = merged_average.drop(columns=['Year_x', 'Year_y'])
+
+merged_average['poverty_comparison']= (merged_average['pov_est_over9'] - merged_average['pov_est_under9']) * 100
+merged_average = merged_average.loc[merged_average['index'].isin(['mean', 'std', 'min', 'max', '50%', '25%','75%'])]
+merged_average = merged_average.drop(columns = ['Av_Cert_over9','Av_Cert_under9'])
+print(merged_average)
