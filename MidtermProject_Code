@@ -1,0 +1,869 @@
+# IMPORT PACKAGES
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from datetime import datetime
+import numpy as np
+import matplotlib.patches as mpatches
+
+# READ THE FILES
+df = pd.read_csv("/Users/laurenmurphy/Desktop/DS_PROJ/snap.csv")
+df2 = pd.read_csv("/Users/laurenmurphy/Desktop/DS_PROJ/2003_2016.csv")
+
+# DATA PREPARATION
+highest_states = ['MS', 'LA', 'KY', 'NM', 'AL', 'AR', 'GA', 'SC', 'AZ', 'WV']
+lowest_states = ['IA', 'WY', 'MA', 'MN', 'MD', 'RI', 'HI', 'NJ', 'NH', 'CT']
+above_states = ['AL', 'AR', 'AZ', 'DC', 'FL', 'GA', 'KY', 'LA', 'MI', 'MD', 'MS', 'MT', 'NC', 'NM', 'OK', 'OR', 'SC',
+                'SD', 'TN', 'TX', 'WA', 'WI', 'WY']
+below_states = ['AK', 'CA', 'CT', 'CO', 'DE', 'HI', 'IA', 'ID', 'IL', 'IN', 'KS', 'MA', 'MD', 'ME', 'MN', 'ND', 'NE',
+                'NH', 'NJ', 'NV', 'NY', 'OH', 'PA', 'RI', 'UT', 'VA', 'VT', 'WV']
+all_states = above_states+below_states
+high_low_states = highest_states + lowest_states
+
+# CLEANING DARA
+df['Observation_Year'] = pd.to_datetime(df['Observation_Year']) # makes a new column and converts to datetime obj
+df['Year'] = df['Observation_Year'].dt.year # extracts year and makes it a new column
+df['Month'] = df['Observation_Year'].dt.month
+df2.rename(columns={'State': 'State_Abbreviation'}, inplace=True) # makes sure a new df isnt made, permanent changes
+
+# SUBSETTING
+df = df[df['Year'] >= 2003]
+df2 = df2[['State_Abbreviation', 'Year_Only ', 'Month', '% Poverty Estimate (All Ages)', 'Poverty Estimate, All Ages']]
+df = df[['State_Abbreviation', 'Month', 'Year', 'Observation_Year', 'Asset_Test', 'Household_State_Limit',
+         'Call_Centers_Availability', 'Online_SNAP_Application_Submission',
+         'Average_Certification_Period', 'Is_Legal_Noncitizen_Eligible_For_SNAP',
+         'Is_Simplified_Reporting_Option_Available','Units_1_to_3_Months_Recertification']]
+df.fillna(0, inplace=True) # makes sure a new df isnt made, permanent changes
+df2.fillna(0, inplace=True) # makes sure a new df isnt made, permanent changes
+
+# HYPOTHESIS: states with higher poverty will have more restrictive policies (accessibility online, call centers,
+# verification time) toward SNAP
+
+#BACKGROUND: POVERTY LEVEL BY STATE (using December as the benchmark month)
+
+# CLEANING DATA
+year_df2_2 = df2[df2['Month'] == 12]
+
+
+# DOING CALCULATIONS
+
+# Filtering Average Poverty Level Per Year Across All States
+avg_poverty = (
+    df2.groupby(['Year_Only ', 'Month', 'State_Abbreviation'])
+    ['% Poverty Estimate (All Ages)']
+    .mean().reset_index()) # makes the index again, i get confused on how to graph when its not reset
+
+# Pivot dataset for clarity
+pivoted_data = avg_poverty.pivot(index='Year_Only ', columns='State_Abbreviation',
+                                          values='% Poverty Estimate (All Ages)')
+
+# Find and sort the means for each state
+state_poverty_means = pivoted_data.mean()
+state_poverty_means = state_poverty_means.sort_values(ascending=False)
+
+# Reset index to turn the state abbreviations into a column
+state_means_df = state_poverty_means.reset_index()
+state_means_df.columns = ['State_Abbreviation', 'Average_Poverty_Level']
+
+# Calculate the overall average mean acoss all states
+overall_average = state_means_df['Average_Poverty_Level'].mean()
+
+# Filter the series
+filtered_lowest = state_poverty_means[state_poverty_means.index.isin(lowest_states)]
+filtered_highest = state_poverty_means[state_poverty_means.index.isin(highest_states)]
+
+#means
+filtered_lowest_mean_percent = (filtered_lowest.mean().round(4))*100
+filtered_highest_mean_percent =(filtered_highest.mean().round(4))*100
+
+print(f'The average percentage of poverty across the 10 lowest poverty states is,',filtered_lowest_mean_percent,
+'% and across highest poverty states is,',filtered_highest_mean_percent, '%')
+
+# PLOTTING
+plt.figure(figsize=(12, 6))
+sns.barplot(x='State_Abbreviation', y='Average_Poverty_Level', data=state_means_df)
+plt.axhline(overall_average, color='red', linestyle='--', label=f'Overall Average: {overall_average: .2f}') # draws horizontal line across axis
+plt.xticks(rotation=45)
+plt.title('Average Percent of the Population in Poverty By State: 2003-2016')
+plt.xlabel('State Abbreviation')
+plt.ylabel('Percent Poverty (In Decimal Form)')
+plt.show()
+
+# VERIFICATION TIME (certification)
+
+# CLEAN DATA
+year_df = df[df['Month'] == 12]
+final_df = year_df[['Year', 'Average_Certification_Period', 'State_Abbreviation']].fillna(0)
+lowest_states_cert = final_df[final_df['State_Abbreviation'].isin(lowest_states)]
+highest_states_cert = final_df[final_df['State_Abbreviation'].isin(highest_states)]
+
+# CALCULATIONS
+
+# Find the means across the highest and lowest states by pivoting
+lowest_pivoted = lowest_states_cert.pivot(
+    index='Year',
+    columns='State_Abbreviation',
+    values='Average_Certification_Period')
+
+highest_pivoted = highest_states_cert.pivot(
+    index='Year',
+    columns='State_Abbreviation',
+    values='Average_Certification_Period')
+
+lowest_mean = lowest_pivoted.mean()
+highest_mean = lowest_pivoted.mean()
+
+# Find the mean line of high and low stats to put into plots, and rename columns. why axis?
+# i left the queston why axis as a note to myself because i forgot. its because it does it horizontally for each value
+combined_mean = pd.concat([lowest_pivoted.mean(axis=1), highest_pivoted.mean(axis=1)], axis=1) # it makes year the index, then rows 0 and 1 which give the means. it removes the names of the states
+combined_mean.columns = ['Lowest States', 'Highest States']
+
+# There are no values for 2016 for this measure
+combined_mean = combined_mean.drop(2016)
+
+# calculate statistics
+lowest_cert_low = combined_mean['Lowest States'].min()
+highest_cert_low = combined_mean['Lowest States'].max()
+lowest_cert_high =combined_mean['Highest States'].min()
+highest_cert_high = combined_mean['Highest States'].max()
+print(f'The average certifications lowest point for low poverty states is', lowest_cert_low,
+      'and highest point is', highest_cert_low)
+print(f'The average certifications lowest point for High poverty is', lowest_cert_high,
+      'and highest point', highest_cert_high)
+
+# While certification may be faster in higher states, maybe certification needs to happen more frequently.
+one_three = year_df[['Year', 'Units_1_to_3_Months_Recertification', 'State_Abbreviation']].fillna(0) #sometimes the NA wasnt filled with 0  and  couldnt
+# tell why so i did it again
+lowest_states_one_three = one_three[one_three['State_Abbreviation'].isin(lowest_states)]
+highest_states_one_three = one_three[one_three['State_Abbreviation'].isin(highest_states)]
+
+# Find the means across the highest and lowest states by pivoting
+lowest_one_three = lowest_states_one_three.pivot(
+    index='Year',
+    columns='State_Abbreviation',
+    values='Units_1_to_3_Months_Recertification')
+
+highest_one_three = highest_states_one_three.pivot(
+    index='Year',
+    columns='State_Abbreviation',
+    values='Units_1_to_3_Months_Recertification')
+
+# find the mean for each state over 10 years
+lowest_mean_one_three = lowest_one_three.mean().mean()  # takes the mean by state, then takes the mean of all states
+highest_mean_one_three = highest_one_three.mean().mean()
+# convert
+lowest_mean_one_three = lowest_mean_one_three * 100
+highest_mean_one_three = highest_mean_one_three * 100
+
+print('The Average percent of lowest poverty states that require recertification every 1-3 months is,',lowest_mean_one_three,
+      'and for highest poverty states is',highest_mean_one_three)
+
+# PLOTTING
+
+
+# Plotting for lowest states
+plt.figure(figsize=(10, 6))
+plt.plot(
+    lowest_pivoted.index, # This section plots mean; Index takes only the years
+    lowest_pivoted.mean(axis=1),  # axis = 1 treats column values as individual data points
+    label='Mean',
+    color='black',
+    linestyle='--')
+plt.plot(
+    lowest_pivoted, # This section plots individual state lines
+    alpha=0.5,
+    color='#0C610A')
+plt.xlabel('Year')
+plt.xlim(2003, 2015)
+plt.ylabel('Months Until Certification')
+plt.title('Average Certification Period in Lowest Poverty States: 2003-2015')
+plt.legend()
+plt.grid(True) # adds a grid
+plt.show()
+
+# Plotting for highest states
+plt.figure(figsize=(10, 6))
+plt.plot(
+    highest_pivoted.index,
+    highest_pivoted.mean(axis=1),
+    label='Mean',
+    color='black',
+    linestyle='--')
+plt.plot(
+    highest_pivoted,
+    alpha=0.5,
+    color='#A81E00')
+plt.xlabel('Year')
+plt.xlim(2003, 2015)
+plt.ylabel('Months Until Certification')
+plt.title('Average Certification Period in Highest Poverty States: 2003-2015')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plotting the two means ontop of eachother for comparison
+plt.figure(figsize=(10, 6))
+plt.plot(
+    combined_mean.index, # exttracting the years from the index, which is used as x values for the df
+    combined_mean['Lowest States'],
+    label='Lowest Poverty States',
+    color='#0C610A')
+plt.plot(
+    combined_mean.index,
+    combined_mean['Highest States'],
+    label='Highest Poverty States',
+    color='#A81E00')
+plt.xlabel('Year')
+plt.xlim(2003, 2015)
+plt.ylabel('Months Until Certification')
+plt.title('Average Certification Period High and Low State Comparison')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# ACCESSIBILITY ONLINE
+
+# CLEAN DATA
+
+df_filtered = df[df['Month'] == 12]
+# Filter based on 3 possible answers
+online_application = df_filtered.loc[df['Online_SNAP_Application_Submission'] == 'yes, Statewide']
+no_online_application = df_filtered.loc[df['Online_SNAP_Application_Submission'] == 'no']
+sorta_online_application = df_filtered.loc[df['Online_SNAP_Application_Submission'] ==
+                                           ('yes, in only select parts of the State')]
+columns_drop= ['Asset_Test','Household_State_Limit', 'Call_Centers_Availability','Average_Certification_Period',
+               'Is_Legal_Noncitizen_Eligible_For_SNAP', 'Observation_Year', 'Is_Simplified_Reporting_Option_Available']
+online_app = online_application.drop(columns=columns_drop)
+no_online_app = no_online_application.drop(columns=columns_drop)
+sorta_online_app = sorta_online_application.drop(columns=columns_drop)
+
+# DOING CALCULATIONS
+
+# data extracted from 'state_means': we will need this later
+highest_states_poverty_means = state_poverty_means[highest_states]
+lowest_states_poverty_means = state_poverty_means[lowest_states]
+
+# Count how many years applications were (online, offline, or sorta), filter by top 10 and bottom 10 data
+highest_online_app_counts = (
+    online_app.groupby('State_Abbreviation')['Year']
+    .nunique() # makes it so there is only one value for each year, since its monthly data
+    .reset_index(name='Yes_Years_Count')
+)
+highest_online_app_counts = (
+    highest_online_app_counts
+    .set_index('State_Abbreviation')
+    .reindex(highest_states).reset_index() # the reindex makes sure all the states are included, even if their values are 0, since when you merge sometimes it creates problems
+)
+
+highest_no_online_app_counts = (
+    no_online_app.groupby
+    ('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='No_Years_Count')
+)
+highest_no_online_app_counts = (
+    highest_no_online_app_counts
+    .set_index('State_Abbreviation')
+    .reindex(highest_states)
+    .reset_index()
+)
+highest_sorta_online_app_counts = (
+    sorta_online_app.groupby
+    ('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Sorta_Years_Count')
+)
+highest_sorta_online_app_counts = (
+    highest_sorta_online_app_counts
+    .set_index('State_Abbreviation')
+    .reindex(highest_states)
+    .reset_index()
+)
+lowest_online_app_counts = (
+    online_app.groupby
+    ('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Yes_Years_Count_2')
+)
+lowest_online_app_counts = (
+    lowest_online_app_counts.
+    set_index('State_Abbreviation')
+    .reindex(lowest_states)
+    .reset_index()
+)
+lowest_sorta_online_app_counts = (
+    sorta_online_app
+    .groupby('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Sorta_Years_Count_2')
+)
+lowest_sorta_online_app_counts = (
+    lowest_sorta_online_app_counts
+    .set_index('State_Abbreviation')
+    .reindex(lowest_states)
+    .reset_index()
+)
+lowest_no_online_app_counts = (
+    no_online_app.
+    groupby('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='No_Years_Count_2')
+)
+lowest_no_online_app_counts = (
+    lowest_no_online_app_counts
+    .set_index('State_Abbreviation')
+    .reindex(lowest_states)
+    .reset_index()
+)
+# Count how many years applications were (online, offline, or sorta), filter by above and below mean
+
+highest_online_app_counts_2 = (
+    online_app.groupby('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Yes_Years_Count_2')
+)
+
+highest_online_app_counts_2= (
+    highest_online_app_counts_2
+    .set_index('State_Abbreviation')
+    .reindex(above_states).reset_index()
+)
+
+highest_no_online_app_counts_2 = (
+    no_online_app.groupby
+    ('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='No_Years_Count_2')
+)
+highest_no_online_app_counts_2 = (
+    highest_no_online_app_counts_2
+    .set_index('State_Abbreviation')
+    .reindex(above_states)
+    .reset_index()
+)
+highest_sorta_online_app_counts_2 = (
+    sorta_online_app.groupby
+    ('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Sorta_Years_Count_2')
+)
+
+highest_sorta_online_app_counts_2 = (
+    highest_sorta_online_app_counts_2
+    .set_index('State_Abbreviation')
+    .reindex(above_states)
+    .reset_index()
+)
+lowest_online_app_counts_2 = (
+    online_app.groupby
+    ('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Yes_Years_Count_2_2')
+)
+
+lowest_online_app_counts_2 = (
+    lowest_online_app_counts_2.
+    set_index('State_Abbreviation')
+    .reindex(below_states)
+    .reset_index()
+)
+lowest_sorta_online_app_counts_2 = (
+    sorta_online_app
+    .groupby('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='Sorta_Years_Count_2_2')
+)
+lowest_sorta_online_app_counts_2 = (
+    lowest_sorta_online_app_counts_2
+    .set_index('State_Abbreviation')
+    .reindex(below_states)
+    .reset_index()
+)
+lowest_no_online_app_counts_2 = (
+    no_online_app.
+    groupby('State_Abbreviation')['Year']
+    .nunique()
+    .reset_index(name='No_Years_Count_2_2')
+)
+lowest_no_online_app_counts_2 = (
+    lowest_no_online_app_counts_2
+    .set_index('State_Abbreviation')
+    .reindex(below_states)
+    .reset_index()
+)
+
+
+
+# fill the NA column with 0: if it does not exist in the specific 'Yes/No/Sorta', it means there are no values for it
+# i redid this since there was errors for the Nan valyes, i didnt actually fully understand what the errors were but
+# when i reset the Nan to 0 t fixed it. there must hve been an error with merging
+highest_online_app_counts.fillna({'Yes_Years_Count': 0}, inplace=True)
+highest_no_online_app_counts.fillna({'No_Years_Count': 0}, inplace=True)
+highest_sorta_online_app_counts.fillna({'Sorta_Years_Count': 0}, inplace=True)
+lowest_online_app_counts.fillna({'Yes_Years_Count_2': 0}, inplace=True)
+lowest_sorta_online_app_counts.fillna({'Sorta_Years_Count_2': 0}, inplace=True)
+lowest_no_online_app_counts.fillna({'Sorta_Years_Count_2': 0}, inplace=True)
+
+# Do the same for above and below mean
+highest_online_app_counts_2.fillna({'Yes_Years_Count_2': 0}, inplace=True)
+highest_no_online_app_counts_2.fillna({'No_Years_Count_2': 0}, inplace=True)
+highest_sorta_online_app_counts_2.fillna({'Sorta_Years_Count_2': 0}, inplace=True)
+lowest_online_app_counts_2.fillna({'Yes_Years_Count_2_2': 0}, inplace=True)
+lowest_sorta_online_app_counts_2.fillna({'Sorta_Years_Count_2_2': 0}, inplace=True)
+lowest_no_online_app_counts_2.fillna({'No_Years_Count_2_2': 0}, inplace=True)
+
+# Merge the three responses into low and high dataframes for plotting the top and bottom 10. its kinda like layering
+# ontop of eachother
+merge_low = (
+    lowest_no_online_app_counts.merge(
+        lowest_sorta_online_app_counts,
+        on='State_Abbreviation',
+        how='outer')
+)
+merge_low = (
+    merge_low.merge(
+        lowest_online_app_counts,
+        on='State_Abbreviation',
+        how='outer')
+)
+
+merged_high = (
+    highest_no_online_app_counts.merge(
+        highest_sorta_online_app_counts,
+        on='State_Abbreviation',
+        how='outer')
+)
+merged_high = (
+    merged_high.merge(
+        highest_online_app_counts,
+        on='State_Abbreviation',
+        how='outer')
+)
+
+# PLOTTING
+
+# Plot lowest poverty states
+plt.figure(figsize=(10, 6))
+plt.bar(merge_low['State_Abbreviation'], # Plot the first set of bars
+        merge_low['No_Years_Count_2'],
+        color='#A81E00',
+        label='No Online'
+        )
+plt.bar(merge_low['State_Abbreviation'],  # Plot the second set of bars
+        merge_low['Sorta_Years_Count_2'],
+        bottom=merge_low['No_Years_Count_2'],  # Set the starting point for the bars equal to the top # of the
+        # 'No Online' bars
+        color='#B29F30',
+        label='Partially Online'
+        )
+plt.bar(merge_low['State_Abbreviation'], # Plot the final set of bars
+        merge_low['Yes_Years_Count_2'],
+        bottom=merge_low['No_Years_Count_2'] + merge_low['Sorta_Years_Count_2'],  # Set the starting point (bottom) for
+        # these bars as the combined height of 'No Online' and 'Partially Online' bars.
+        color='#0C610A',
+        label='Fully Online')
+plt.xlabel('State')
+plt.ylabel('Years')
+plt.title('Online SNAP Application Availability for Lowest Poverty States: 2003-2016')
+plt.legend()
+plt.show()
+
+# Plot highest poverty states
+plt.figure(figsize=(10, 6))
+plt.bar(merged_high['State_Abbreviation'],
+        merged_high['No_Years_Count'],
+        color='#A81E00',
+        label='No Online')
+plt.bar(merged_high['State_Abbreviation'],
+        merged_high['Sorta_Years_Count'],
+        bottom=merged_high['No_Years_Count'],
+        color='#B29F30',
+        label='Partially Online')
+plt.bar(merged_high['State_Abbreviation'],
+        merged_high['Yes_Years_Count'],
+        bottom=merged_high['No_Years_Count'] + merged_high['Sorta_Years_Count'],
+        color='#0C610A',
+        label='Fully Online')
+plt.xlabel('State')
+plt.ylabel('Years')
+plt.title('Online SNAP Application Availability for Highest Poverty States: 2003-2016')
+plt.legend()
+plt.show()
+
+# Statistical Analysis
+# For top and bottom 10 states
+mean_highest_online = highest_online_app_counts['Yes_Years_Count'].mean()
+mean_highest_sorta = highest_sorta_online_app_counts['Sorta_Years_Count'].mean()
+mean_highest_no = highest_no_online_app_counts['No_Years_Count'].mean()
+mean_lowest_online = lowest_online_app_counts['Yes_Years_Count_2'].mean()
+mean_lowest_no = lowest_no_online_app_counts['No_Years_Count_2'].mean()
+mean_lowest_sorta = lowest_sorta_online_app_counts['Sorta_Years_Count_2'].mean()
+print(f'For Highest Poverty States, Online Snap Application Availability is', mean_highest_online,
+      'Offline Availability is', mean_highest_no, 'Partial Availability is', mean_highest_sorta)
+print(f'For Lowest Poverty States, Online Snap Application Availability is', mean_lowest_online,
+      'Offline Availability is', mean_lowest_no, 'Partial Availability is', mean_lowest_sorta)
+
+# for above and below mean
+mean_highest_online_2 = highest_online_app_counts_2['Yes_Years_Count_2'].mean()
+mean_highest_sorta_2 = highest_sorta_online_app_counts_2['Sorta_Years_Count_2'].mean()
+mean_highest_no_2 = highest_no_online_app_counts_2['No_Years_Count_2'].mean()
+mean_lowest_online_2 = lowest_online_app_counts_2['Yes_Years_Count_2_2'].mean()
+mean_lowest_no_2 = lowest_no_online_app_counts_2['No_Years_Count_2_2'].mean()
+mean_lowest_sorta_2 = lowest_sorta_online_app_counts_2['Sorta_Years_Count_2_2'].mean()
+
+print(f'For Poverty States above mean poverty, Online Snap Application Availability is', mean_highest_online_2,
+      'Offline Availability is', mean_highest_no_2, 'Partial Availability is', mean_highest_sorta_2)
+print(f'For Poverty States below mean poverty, Online Snap Application Availability is', mean_lowest_online_2,
+      'Offline Availability is', mean_lowest_no_2, 'Partial Availability is', mean_lowest_sorta_2)
+
+# Outcome: poorer states have less accessibility online --> support hypothesis
+
+# CALL CENTER AVAILABILITY
+
+# CLEAN DATA
+
+highest_states = ['MS', 'LA', 'KY', 'NM', 'AL','AR','GA','SC','AZ','WV']
+lowest_states = ['IA','WY','MA','MN','MD','RI','HI','NJ','NH','CT']
+df_filtered = df[df['Month'] == 12]
+
+# Make dataframes for no call centers, no call centers, and some call centers
+no_call= df_filtered.loc[df['Call_Centers_Availability']=='no call centers']
+yes_call= df_filtered.loc[df['Call_Centers_Availability']=='call centers available Statewide']
+sorta_call = df_filtered.loc[df['Call_Centers_Availability']==
+                                           ('call centers available only in select parts of the State')]
+columns_drop2= ['Asset_Test', 'Household_State_Limit',
+                'Online_SNAP_Application_Submission','Average_Certification_Period',
+                'Is_Legal_Noncitizen_Eligible_For_SNAP','Observation_Year','Is_Simplified_Reporting_Option_Available']
+no_call= no_call.drop(columns=columns_drop2)
+yes_call = yes_call.drop(columns=columns_drop2)
+sorta_call = sorta_call.drop(columns=columns_drop2)
+
+# DOING CALCULATION
+
+
+# find the sum of how many years for each call option
+no_call_count = (
+    no_call.groupby('State_Abbreviation')['Call_Centers_Availability']
+    .count()
+    .reset_index(name='Total_No_Call_Counts'))
+
+yes_call_count = (
+    yes_call.groupby('State_Abbreviation')['Call_Centers_Availability']
+    .count()
+    .reset_index(name='Total_Yes_Call_Counts'))
+
+sorta_call_count = (
+    sorta_call.groupby('State_Abbreviation')['Call_Centers_Availability']
+    .count()
+    .reset_index(name='Total_Sorta_Call_Counts'))
+
+# Sort the three options by highest and lowest states
+high_no_call_sort= no_call_count[no_call_count['State_Abbreviation'].isin(highest_states)]
+high_sorta_call_sort= sorta_call_count[sorta_call_count['State_Abbreviation'].isin(highest_states)]
+high_yes_call_sort= yes_call_count[yes_call_count['State_Abbreviation'].isin(highest_states)]
+low_no_call_sort= no_call_count[no_call_count['State_Abbreviation'].isin(lowest_states)]
+low_sorta_call_sort= sorta_call_count[sorta_call_count['State_Abbreviation'].isin(lowest_states)]
+low_yes_call_sort= yes_call_count[yes_call_count['State_Abbreviation'].isin(lowest_states)]
+
+# Reindex the dataframes to include states with NaN, substituted as '0'
+high_no_call = high_no_call_sort.set_index('State_Abbreviation').reindex(highest_states).fillna(0).reset_index()
+high_sorta_call = high_sorta_call_sort.set_index('State_Abbreviation').reindex(highest_states).fillna(0).reset_index()
+high_yes_call = high_yes_call_sort.set_index('State_Abbreviation').reindex(highest_states).fillna(0).reset_index()
+low_no_call = low_no_call_sort.set_index('State_Abbreviation').reindex(lowest_states).fillna(0).reset_index()
+low_sorta_call = low_sorta_call_sort.set_index('State_Abbreviation').reindex(lowest_states).fillna(0).reset_index()
+low_yes_call = low_yes_call_sort.set_index('State_Abbreviation').reindex(lowest_states).fillna(0).reset_index()
+
+# See where the means are
+mean_high_a =  high_no_call ['Total_No_Call_Counts'].sum()/10
+mean_high_b = high_sorta_call ['Total_Sorta_Call_Counts'].sum()/10
+mean_high_c = high_yes_call ['Total_Yes_Call_Counts'].sum()/10
+mean_low_a =  low_no_call ['Total_No_Call_Counts'].sum()/10
+mean_low_b = low_sorta_call ['Total_Sorta_Call_Counts'].sum()/10
+mean_low_c =low_yes_call ['Total_Yes_Call_Counts'].sum()/10
+print('\t for highest poverty, high no call mean',mean_high_a,'sorta call mean',mean_high_b,'yes call mean',mean_high_c)
+print('for lowest poverty, low no call mean',mean_low_a,'sorta call mean',mean_low_b,'yes call mean',mean_low_c)
+
+# PLOTTING
+
+
+# Prepare data by merging into high and low dataframes
+merged_high = high_no_call.merge(high_sorta_call, on='State_Abbreviation', how='outer')
+merged_high = merged_high.merge(high_yes_call, on='State_Abbreviation', how='outer')
+merged_low = low_no_call.merge(low_sorta_call, on='State_Abbreviation', how='outer')
+merged_low = merged_low.merge(low_yes_call, on='State_Abbreviation', how='outer')
+
+# Plot low poverty states
+plt.figure(figsize=(10, 6))
+
+plt.bar(
+    merged_low['State_Abbreviation'],
+    merged_low['Total_No_Call_Counts'], # Start stack with 'No Call Counts'
+    color='#A81E00',
+    label='No Call Centers'
+)
+plt.bar(
+    merged_low['State_Abbreviation'],
+    merged_low['Total_Sorta_Call_Counts'],
+    bottom=merged_low['Total_No_Call_Counts'],  # Plot 'Sorta Call Counts' on top of 'No Call Counts'
+    color='#B29F30',
+    label='Partial Call Centers'
+)
+plt.bar(
+    merged_low['State_Abbreviation'],
+    merged_low['Total_Yes_Call_Counts'],
+    bottom=merged_low['Total_No_Call_Counts'] + merged_low['Total_Sorta_Call_Counts'],  # Plot 'Yes Call Counts' on top
+    # of 'Sorta Call Counts' and 'No Call Counts'
+    color='#0C610A',
+    label='Yes Call Centers'
+)
+plt.title('Call Center Availability in Lowest Poverty States: 2003-2016')
+plt.xlabel('State Abbreviation')
+plt.ylabel('Years')
+plt.legend()
+plt.show()
+
+# Plot high poverty states
+plt.figure(figsize=(10, 6))
+plt.bar(
+    merged_high['State_Abbreviation'],
+    merged_high['Total_No_Call_Counts'], # Start stack with 'No Call Counts'
+    color='#A81E00',
+    label='No Call Centers'
+)
+plt.bar(
+    merged_high['State_Abbreviation'],
+    merged_high['Total_Sorta_Call_Counts'],
+    bottom=merged_high['Total_No_Call_Counts'],  # Plot 'Sorta Call Counts' on top of 'No Call Counts'
+    color='#B29F30',
+    label='Partial Call Centers'
+)
+
+# Plot 'Yes Call Counts' on top of the 'No' and 'Sorta' call counts for high poverty states
+plt.bar(
+    merged_high['State_Abbreviation'],
+    merged_high['Total_Yes_Call_Counts'],
+    bottom=merged_high['Total_No_Call_Counts'] + merged_high['Total_Sorta_Call_Counts'],  # Plot 'Yes Call Counts' on
+    # top of 'Sorta Call Counts' and 'No Call Counts'
+    color='#0C610A',
+    label='Yes Call Centers'
+)
+plt.title('Call Center Availability in Highest Poverty States: 2003-2016')
+plt.xlabel('State Abbreviation')
+plt.ylabel('Years')
+plt.legend()
+plt.show()
+
+# SIMPLIFIED REPORTING
+
+#CLEAN DATA
+
+df_filtered_2 = df[df['Month'] == 12]
+df_filtered_2 = df_filtered_2.fillna(0)
+simplified = df_filtered_2[df_filtered_2['Is_Simplified_Reporting_Option_Available'] == True]
+not_simplified = df_filtered_2[df_filtered_2['Is_Simplified_Reporting_Option_Available'] == False]
+columns_drop2= ['Asset_Test', 'Household_State_Limit',
+               'Online_SNAP_Application_Submission', 'Call_Centers_Availability',
+               'Average_Certification_Period', 'Is_Legal_Noncitizen_Eligible_For_SNAP','Observation_Year']
+simplified= simplified.drop(columns=columns_drop2)
+not_simplified = not_simplified.drop(columns=columns_drop2)
+
+
+# filter for highest and lowest states
+high_simplified = simplified[simplified['State_Abbreviation'].isin(highest_states)]
+high_not_simplified = not_simplified[not_simplified['State_Abbreviation'].isin(highest_states)]
+low_simplified = simplified[simplified['State_Abbreviation'].isin(lowest_states)]
+low_not_simplified = not_simplified[not_simplified['State_Abbreviation'].isin(lowest_states)]
+
+
+# Count how many true and false for high and low states
+high_simplified_count = (
+    high_simplified.groupby('State_Abbreviation')
+    .size()
+    .reset_index(name='Is_Simplified_Reporting_Option_Available')
+)
+high_not_simplified_count = (
+    high_not_simplified.groupby
+    ('State_Abbreviation')
+    .size()
+    .reset_index(name='H_not_simplified_count')
+)
+low_simplified_count = (
+    low_simplified.groupby
+    ('State_Abbreviation')
+    .size()
+    .reset_index(name='L_simplified_count'))
+low_not_simplified_count = (
+    low_not_simplified.groupby
+    ('State_Abbreviation')
+    .size()
+    .reset_index(name='L_not_simplified_count')
+)
+# Calculate means for top and bottom 10 states
+mean_low_not_simplified = low_not_simplified_count['L_not_simplified_count'].mean()
+mean_low_simplified = low_simplified_count['L_simplified_count'].mean()
+mean_high_simplified = high_simplified_count['Is_Simplified_Reporting_Option_Available'].mean()
+mean_not_high_simplified = high_not_simplified_count['H_not_simplified_count'].mean()
+
+print('The mean of simplified reporting for highest ten and lowest ten poverty states are',mean_high_simplified,'and',mean_low_simplified,'years',
+      'and the mean of no simplified reporting for highest ten and lowest ten poverty states are',mean_not_high_simplified,'and',mean_low_not_simplified)
+
+# Plot 'Simplified' for high poverty states
+plt.figure(figsize=(10, 6))
+plt.bar(
+    high_simplified_count['State_Abbreviation'],
+    high_simplified_count['Is_Simplified_Reporting_Option_Available'],
+    color='#0C610A',
+    label='Simplified Reporting Available'
+)
+# Plot 'Not Simplified' on top of 'Simplified' for high poverty states
+plt.bar(
+    high_not_simplified_count['State_Abbreviation'],
+    high_not_simplified_count['H_not_simplified_count'],
+    bottom=high_simplified_count['Is_Simplified_Reporting_Option_Available'],  # Stack
+    color='#A81E00',
+    label='Simplified Reporting Not Available'
+)
+plt.title('Simplified Reporting Option in Highest Poverty States : 2003-2016')
+plt.xlabel('State Abbreviation')
+plt.ylabel('Years')
+plt.legend()
+plt.show()
+
+# Plot 'Simplified' for low poverty states
+plt.figure(figsize=(10, 6))
+plt.bar(
+    low_simplified_count['State_Abbreviation'],
+    low_simplified_count['L_simplified_count'],
+    color='#0C610A',
+    label='Simplified Reporting Available'
+)
+# Plot 'Not Simplified' on top of 'Simplified' for low poverty states
+plt.bar(
+    low_not_simplified_count['State_Abbreviation'],
+    low_not_simplified_count['L_not_simplified_count'],
+    bottom=low_simplified_count['L_simplified_count'], #Stack
+    color='#A81E00',
+    label='Simplified Reporting Not Available'
+)
+plt.title('Simplified Reporting Option in Lowest Poverty States: 2003-2016')
+plt.xlabel('State Abbreviation')
+plt.ylabel('Years')
+plt.legend()
+plt.show()
+# outcome: Poorer states have more simplified reporting --> reject hypothesis
+
+# Checking all 50 states
+above_simplified = simplified[simplified['State_Abbreviation'].isin(above_states)]
+
+above_not_simplified = not_simplified[not_simplified['State_Abbreviation'].isin(above_states)]
+below_simplified = simplified[simplified['State_Abbreviation'].isin(below_states)]
+below_not_simplified = not_simplified[not_simplified['State_Abbreviation'].isin(below_states)]
+
+# Counting number of simplified and not simplified occurences in above and below mean clusters
+above_simplified_count = (
+    above_simplified.groupby
+    ('State_Abbreviation')
+    .size()  # this basically counts the occurences
+    .reset_index(name='A_simplified_count'))
+above_not_simplified_count = (
+    above_not_simplified .groupby
+    ('State_Abbreviation')
+    .size()
+    .reset_index(name='A_not_simplified_count'))
+below_simplified_count = (
+    below_simplified.groupby
+    ('State_Abbreviation')
+    .size().reset_index
+    (name='B_simplified_count'))
+below_not_simplified_count = (
+    below_not_simplified.groupby
+    ('State_Abbreviation')
+    .size()
+    .reset_index(name='B_not_simplified_count'))
+
+# Count the mean for above and below mean clusters
+above_s_average= above_simplified_count['A_simplified_count'].mean()
+above_ns_average =above_not_simplified_count['A_not_simplified_count'].mean()
+below_s_average = below_simplified_count['B_simplified_count'].mean()
+below_ns_average = below_not_simplified_count['B_not_simplified_count'].mean()
+
+print('The mean years for above poverty mean states providing simplified applications is,', above_s_average, ' and',
+      above_ns_average, 'not simplified')
+print('The mean years for below poverty mean states providing simplified applications is,,', below_s_average, 'simplified and',
+      below_ns_average, 'not simplified')
+
+# merge for plotting
+merge_low_no = pd.merge(low_no_call, lowest_no_online_app_counts, on='State_Abbreviation', how='inner')
+merge_low_sorta = pd.merge(low_sorta_call, lowest_sorta_online_app_counts, on='State_Abbreviation', how='inner')
+merge_low_yes = pd.merge(low_yes_call, lowest_online_app_counts, on='State_Abbreviation', how='inner')
+merge_high_no = pd.merge(high_no_call, highest_no_online_app_counts, on='State_Abbreviation', how='inner')
+merge_high_sorta =pd.merge(high_sorta_call, highest_sorta_online_app_counts, on='State_Abbreviation', how='inner')
+merge_high_yes =pd.merge(high_yes_call, highest_online_app_counts, on='State_Abbreviation', how='inner')
+
+# Plot low figures
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=merge_low_no, x='Total_No_Call_Counts', y='No_Years_Count_2', color='red')
+sns.scatterplot(data=merge_low_sorta, x='Total_Sorta_Call_Counts', y='Sorta_Years_Count_2', color='yellow')
+sns.scatterplot(data=merge_low_yes, x='Total_Yes_Call_Counts', y='Yes_Years_Count_2',color='green')
+plt.title('Relationship between (Total No Call Counts) and (Total No Online Counts) in Low Poverty States')
+plt.xlabel('Total No Call Counts')
+plt.ylabel('Total No Online')
+plt.legend
+plt.show()
+
+# Plot high figures
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=merge_high_no, x='Total_No_Call_Counts', y='No_Years_Count', color='red')
+sns.scatterplot(data=merge_high_sorta, x='Total_Sorta_Call_Counts', y='Sorta_Years_Count', color='yellow')
+sns.scatterplot(data=merge_high_yes, x='Total_Yes_Call_Counts', y='Yes_Years_Count',color='green')
+plt.title('Relationship between (Total No Call Counts) and (Total No Online Counts) in High Poverty States')
+plt.xlabel('Total No Call Counts')
+plt.ylabel('Total No Online')
+plt.legend
+plt.show()
+
+# Outcome: Poorer states have more availability for simplified reporting, --> reject hypothesis
+
+# Relationship between online applications and call center
+
+# DATA PREPARATION
+# Combine high and low data for plotting
+combined_low_data = pd.concat([
+    merge_low_no[['State_Abbreviation', 'Total_No_Call_Counts', 'No_Years_Count_2']],
+    merge_low_sorta[['State_Abbreviation', 'Total_Sorta_Call_Counts', 'Sorta_Years_Count_2']],
+    merge_low_yes[['State_Abbreviation', 'Total_Yes_Call_Counts', 'Yes_Years_Count_2']]
+], ignore_index=True) # ignore index is just for ease. i found it challenging to melt and pivto when the index wasnt there
+combined_low_data['Total_Call_Counts'] = combined_low_data[['Total_No_Call_Counts', 'Total_Sorta_Call_Counts', 'Total_Yes_Call_Counts']].sum(axis=1)
+combined_low_data['Total_Online_Years'] = combined_low_data[['No_Years_Count_2', 'Sorta_Years_Count_2', 'Yes_Years_Count_2']].sum(axis=1)
+
+combined_high_data = pd.concat([
+    merge_high_no[['Total_No_Call_Counts', 'No_Years_Count']].rename(columns={'No_Years_Count': 'Online_Years_Count'}),
+    merge_high_sorta[['Total_Sorta_Call_Counts', 'Sorta_Years_Count']].rename(columns={'Sorta_Years_Count': 'Online_Years_Count'}),
+    merge_high_yes[['Total_Yes_Call_Counts', 'Yes_Years_Count']].rename(columns={'Yes_Years_Count': 'Online_Years_Count'})
+], ignore_index=True)
+combined_high_data['Total_Call_Counts'] = combined_high_data[['Total_No_Call_Counts', 'Total_Sorta_Call_Counts', 'Total_Yes_Call_Counts']].sum(axis=1)
+combined_high_data['Total_Online_Years'] = combined_high_data[['Online_Years_Count']].sum(axis=1)  # Update this if 'Online_Years_Count' is a summation of specific columns
+
+
+
+# PLOTTING
+
+plt.figure(figsize=(8, 8))  # Adjust for square shape to help with equal aspect ratio
+ax = sns.regplot(data=combined_low_data, x='Total_Call_Counts', y='Total_Online_Years', color='#A81E00')
+ax.set_aspect('equal')
+plt.title('Call Center Availability vs. Online SNAP Application Availability in Low Poverty States')
+plt.xlabel('Total Years with Call Center Availability')
+plt.ylabel('Total Years with Online SNAP Availability')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(8, 8))  # Start with a square figure to aid in equal aspect ratio
+ax = sns.regplot(data=combined_high_data, x='Total_Call_Counts', y='Total_Online_Years', color='blue', label='Regression Line')
+ax.set_aspect('equal')
+plt.title('Call Center Availability vs. Online SNAP Application Availability in High Poverty States')
+plt.xlabel('Total Call Center Counts')
+plt.ylabel('Years of Online SNAP Application Availability')
+plt.grid(True)
+plt.show()
